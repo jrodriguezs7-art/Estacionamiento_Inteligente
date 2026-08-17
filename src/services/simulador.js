@@ -1,160 +1,143 @@
 import {
+  get,
+  push,
   ref,
-  update
+  update,
 } from "firebase/database";
 
 import { db } from "./firebase";
 
-const UMBRAL_OCUPADO = 50;
-
-function generarDistancia(estadoActual) {
-  const aleatorio =
-    Math.random();
-
-  if (estadoActual === "ocupado") {
-    if (aleatorio < 0.70) {
-      return Number(
-        (
-          20 +
-          Math.random() * 28
-        ).toFixed(1)
-      );
-    }
-
-    return Number(
-      (
-        55 +
-        Math.random() * 80
-      ).toFixed(1)
-    );
-  }
-
-  if (aleatorio < 0.75) {
-    return Number(
-      (
-        80 +
-        Math.random() * 180
-      ).toFixed(1)
-    );
-  }
-
-  return Number(
-    (
-      20 +
-      Math.random() * 28
-    ).toFixed(1)
-  );
+function numeroAleatorio(min, max) {
+  return Math.floor(
+    Math.random() * (max - min + 1)
+  ) + min;
 }
 
-function obtenerEstado(distancia) {
-  return distancia <= UMBRAL_OCUPADO
+function generarDistancia(estado) {
+  if (estado === "ocupado") {
+    return numeroAleatorio(25, 49);
+  }
+
+  return numeroAleatorio(120, 280);
+}
+
+function calcularEstado(distancia) {
+  return distancia <= 50
     ? "ocupado"
     : "libre";
 }
 
-export async function simularEspacio(
+export async function simularCambioEspacio(
   espacio
 ) {
   if (!espacio?.id) {
     throw new Error(
-      "El espacio no es válido."
+      "No se proporcionó un espacio válido."
     );
   }
 
-  const distancia =
-    generarDistancia(
-      espacio.estado
-    );
+  const espacioId = espacio.id;
+
+  /*
+   * Alternamos el estado actual para que
+   * sea visible el cambio.
+   */
+  const nuevoEstado =
+    espacio.estado === "ocupado"
+      ? "libre"
+      : "ocupado";
+
+  const distanciaDetectada =
+    generarDistancia(nuevoEstado);
 
   const estado =
-    obtenerEstado(distancia);
+    calcularEstado(distanciaDetectada);
 
-  const fechaHora =
-    Date.now();
+  const timestamp = Date.now();
 
-  const historialId =
-    String(fechaHora);
-
-  const cambios = {};
-
-  cambios[
-    `espacios/${espacio.id}/distanciaDetectada`
-  ] = distancia;
-
-  cambios[
-    `espacios/${espacio.id}/estado`
-  ] = estado;
-
-  cambios[
-    `espacios/${espacio.id}/fechaHora`
-  ] = fechaHora;
-
-  cambios[
-    `historial/${espacio.id}/${historialId}`
-  ] = {
-    distanciaDetectada:
-      distancia,
-
-    estado,
-
-    fechaHora
-  };
-
-  await update(
-    ref(db),
-    cambios
+  /*
+   * Nuevo registro histórico.
+   */
+  const historialRef = ref(
+    db,
+    `historial/${espacioId}`
   );
 
+  const nuevoEventoRef = push(
+    historialRef
+  );
+
+  /*
+   * Actualización múltiple:
+   *
+   * espacios/{id}/distanciaDetectada
+   * espacios/{id}/estado
+   * espacios/{id}/fechaHora
+   *
+   * historial/{id}/{pushId}
+   */
+  const cambios = {
+    [`espacios/${espacioId}/distanciaDetectada`]:
+      distanciaDetectada,
+
+    [`espacios/${espacioId}/estado`]:
+      estado,
+
+    [`espacios/${espacioId}/fechaHora`]:
+      timestamp,
+
+    [`historial/${espacioId}/${nuevoEventoRef.key}`]: {
+      distanciaDetectada,
+      estado,
+      timestamp,
+      fechaHora: timestamp,
+    },
+  };
+
+  await update(ref(db), cambios);
+
   return {
-    distancia,
+    espacioId,
+    distanciaDetectada,
     estado,
-    fechaHora
+    timestamp,
   };
 }
 
 export async function simularVariosEspacios(
   espacios,
-  cantidad = 5
+  cantidad = 4
 ) {
-  if (
-    !Array.isArray(espacios) ||
-    espacios.length === 0
-  ) {
-    return [];
+  if (!Array.isArray(espacios)) {
+    return;
   }
 
-  const copia = [
-    ...espacios
-  ];
+  if (espacios.length === 0) {
+    return;
+  }
 
-  copia.sort(
-    () =>
-      Math.random() -
-      0.5
+  const copia = [...espacios];
+
+  /*
+   * Mezclamos los espacios.
+   */
+  copia.sort(() => Math.random() - 0.5);
+
+  const seleccionados = copia.slice(
+    0,
+    Math.min(cantidad, copia.length)
   );
-
-  const seleccionados =
-    copia.slice(
-      0,
-      Math.min(
-        cantidad,
-        copia.length
-      )
-    );
 
   const resultados = [];
 
   for (const espacio of seleccionados) {
     try {
       const resultado =
-        await simularEspacio(
+        await simularCambioEspacio(
           espacio
         );
 
-      resultados.push({
-        id: espacio.id,
-        ...resultado
-      });
+      resultados.push(resultado);
     } catch (error) {
       console.error(
         `Error simulando ${espacio.id}:`,
@@ -164,4 +147,85 @@ export async function simularVariosEspacios(
   }
 
   return resultados;
+}
+
+/*
+ * Esta función permite inicializar historial
+ * si un espacio no tiene ningún evento.
+ *
+ * Es útil si importaste un JSON que contiene
+ * espacios pero no historial.
+ */
+export async function crearHistorialInicial(
+  espacio,
+  cantidad = 9
+) {
+  if (!espacio?.id) {
+    throw new Error(
+      "Espacio inválido."
+    );
+  }
+
+  const espacioId = espacio.id;
+
+  const historialActual = await get(
+    ref(db, `historial/${espacioId}`)
+  );
+
+  /*
+   * Si ya existe historial no hacemos nada.
+   */
+  if (historialActual.exists()) {
+    return false;
+  }
+
+  const eventos = {};
+
+  const estadoActual =
+    espacio.estado === "ocupado"
+      ? "ocupado"
+      : "libre";
+
+  /*
+   * Generamos 9 eventos históricos.
+   */
+  for (let i = cantidad - 1; i >= 0; i--) {
+
+    const timestamp =
+      Date.now() -
+      i * 5 * 60 * 1000;
+
+    /*
+     * Algunos eventos libres y otros ocupados
+     * para que la vista se parezca a la referencia.
+     */
+    let estado;
+
+    if (i === 0) {
+      estado = estadoActual;
+    } else {
+      estado =
+        Math.random() > 0.55
+          ? "ocupado"
+          : "libre";
+    }
+
+    const distancia =
+      generarDistancia(estado);
+
+    const key = String(timestamp);
+
+    eventos[
+      `historial/${espacioId}/${key}`
+    ] = {
+      distanciaDetectada: distancia,
+      estado,
+      timestamp,
+      fechaHora: timestamp,
+    };
+  }
+
+  await update(ref(db), eventos);
+
+  return true;
 }
