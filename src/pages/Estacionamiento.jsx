@@ -1,168 +1,350 @@
 import { useEffect, useMemo, useState } from "react";
 
-import ResumenEstacionamiento from "../components/ResumenEstacionamiento";
-import CuadriculaEstacionamiento from "../components/CuadriculaEstacionamiento";
-import FiltrosEspacios from "../components/FiltrosEspacios";
-import MapaEstacionamiento from "../components/MapaEstacionamiento";
-
 import { useEspacios } from "../hooks/useEspacios";
+import { useHistorialEspacio } from "../hooks/useHistorialEspacio";
+import HistorialEspacio from "../components/HistorialEspacio";
 
-import {
-  simularVariosEspacios
-} from "../services/simulador";
+import { simularVariosEspacios } from "../services/simulador";
 
 export default function Estacionamiento() {
   const {
-    espacios,
+    espacios = [],
     cargando,
-    error
+    error,
   } = useEspacios();
 
-  const [
-    estadoFiltro,
-    setEstadoFiltro
-  ] = useState("todos");
+  const [espacioSeleccionado, setEspacioSeleccionado] =
+    useState(null);
 
-  const [
-    columnaFiltro,
-    setColumnaFiltro
-  ] = useState("todas");
+  const [filtroEstado, setFiltroEstado] =
+    useState("todos");
 
-  const [
-    seleccionado,
-    setSeleccionado
-  ] = useState(null);
+  const [filtroColumna, setFiltroColumna] =
+    useState("todas");
 
-  const [
-    simulando,
-    setSimulando
-  ] = useState(false);
+  const [simulando, setSimulando] =
+    useState(false);
 
-  const [
-    simulacionAutomatica,
-    setSimulacionAutomatica
-  ] = useState(false);
+  const [automatico, setAutomatico] =
+    useState(false);
+
+  /*
+   * =====================================================
+   * HISTORIAL DEL SENSOR SELECCIONADO
+   * =====================================================
+   */
+
+  const {
+    historial,
+    cargando: cargandoHistorial,
+    error: errorHistorial,
+  } = useHistorialEspacio(
+    espacioSeleccionado?.id || null
+  );
+
+  /*
+   * =====================================================
+   * SELECCIONAR AUTOMÁTICAMENTE EL PRIMER ESPACIO
+   * =====================================================
+   */
+
+  useEffect(() => {
+    if (
+      espacios.length > 0 &&
+      !espacioSeleccionado
+    ) {
+      setEspacioSeleccionado(espacios[0]);
+    }
+  }, [
+    espacios,
+    espacioSeleccionado,
+  ]);
+
+  /*
+   * =====================================================
+   * MANTENER ACTUALIZADO EL SENSOR SELECCIONADO
+   * =====================================================
+   */
+
+  useEffect(() => {
+    if (!espacioSeleccionado) {
+      return;
+    }
+
+    const actualizado =
+      espacios.find(
+        (espacio) =>
+          espacio.id ===
+          espacioSeleccionado.id
+      );
+
+    if (actualizado) {
+      setEspacioSeleccionado(
+        actualizado
+      );
+    }
+  }, [espacios]);
+
+  /*
+   * =====================================================
+   * FILTRADO DE ESPACIOS
+   * =====================================================
+   */
 
   const espaciosFiltrados =
     useMemo(() => {
       return espacios.filter(
         (espacio) => {
-          const coincideEstado =
-            estadoFiltro === "todos" ||
-            espacio.estado ===
-              estadoFiltro;
+          /*
+           * Filtro por estado
+           */
+          if (
+            filtroEstado ===
+            "libres" &&
+            espacio.ocupado
+          ) {
+            return false;
+          }
 
-          const columna =
-            espacio.columnaNombre ||
-            String(
-              espacio.columna
-            );
+          if (
+            filtroEstado ===
+            "ocupados" &&
+            !espacio.ocupado
+          ) {
+            return false;
+          }
 
-          const coincideColumna =
-            columnaFiltro ===
-              "todas" ||
-            columna ===
-              columnaFiltro;
+          /*
+           * Filtro por columna
+           */
+          if (
+            filtroColumna !==
+            "todas"
+          ) {
+            const columna =
+              obtenerColumna(
+                espacio
+              );
 
-          return (
-            coincideEstado &&
-            coincideColumna
-          );
+            if (
+              columna.toUpperCase() !==
+              filtroColumna.toUpperCase()
+            ) {
+              return false;
+            }
+          }
+
+          return true;
         }
       );
     }, [
       espacios,
-      estadoFiltro,
-      columnaFiltro
+      filtroEstado,
+      filtroColumna,
     ]);
 
-  async function ejecutarSimulacion() {
-    if (
-      simulando ||
-      espacios.length === 0
-    ) {
-      return;
-    }
+  /*
+   * =====================================================
+   * ESTADÍSTICAS
+   * =====================================================
+   */
 
-    setSimulando(true);
+  const totalEspacios =
+    espacios.length;
 
-    try {
-      await simularVariosEspacios(
-        espacios,
-        5
+  const espaciosOcupados =
+    espacios.filter(
+      (espacio) =>
+        espacio.ocupado === true
+    ).length;
+
+  const espaciosDisponibles =
+    totalEspacios -
+    espaciosOcupados;
+
+  /*
+   * =====================================================
+   * SELECCIONAR ESPACIO
+   * =====================================================
+   */
+
+  const seleccionarEspacio =
+    (espacio) => {
+      setEspacioSeleccionado(
+        espacio
       );
-    } catch (error) {
-      console.error(
-        "Error en simulación:",
-        error
-      );
-    } finally {
-      setSimulando(false);
-    }
-  }
+    };
+
+  /*
+   * =====================================================
+   * SIMULAR CAMBIOS
+   * =====================================================
+   */
+
+  const ejecutarSimulacion =
+    async () => {
+      if (
+        simulando ||
+        espacios.length === 0
+      ) {
+        return;
+      }
+
+      try {
+        setSimulando(true);
+
+        await simularVariosEspacios(
+          espacios,
+          1
+        );
+      } catch (error) {
+        console.error(
+          "Error al simular cambios:",
+          error
+        );
+      } finally {
+        setSimulando(false);
+      }
+    };
+
+  /*
+   * =====================================================
+   * SIMULACIÓN AUTOMÁTICA
+   * =====================================================
+   */
 
   useEffect(() => {
-    if (
-      !simulacionAutomatica ||
-      espacios.length === 0
-    ) {
-      return undefined;
+    if (!automatico) {
+      return;
     }
 
     const intervalo =
       setInterval(() => {
         ejecutarSimulacion();
-      }, 15000);
+      }, 5000);
 
     return () =>
       clearInterval(
         intervalo
       );
   }, [
-    simulacionAutomatica,
-    espacios.length
+    automatico,
+    espacios,
+    simulando,
   ]);
+
+  /*
+   * =====================================================
+   * ESTADO DE CARGA
+   * =====================================================
+   */
 
   if (cargando) {
     return (
-      <main className="page-container centered">
-        <div className="loading">
-          <div className="loading-spinner"></div>
-          <p>
-            Cargando espacios...
-          </p>
+      <div className="estacionamiento-page">
+        <div className="estado-pagina">
+          Cargando estacionamiento...
         </div>
-      </main>
+      </div>
     );
   }
+
+  /*
+   * =====================================================
+   * ERROR
+   * =====================================================
+   */
 
   if (error) {
     return (
-      <main className="page-container centered">
-        <div className="error-box">
-          <h2>
-            Error de conexión
-          </h2>
-
-          <p>{error}</p>
-
-          <p>
-            Verifica la configuración
-            de Firebase y las reglas
-            de Realtime Database.
-          </p>
+      <div className="estacionamiento-page">
+        <div className="estado-pagina error">
+          {error}
         </div>
-      </main>
+      </div>
     );
   }
 
+  /*
+   * =====================================================
+   * SENSOR SELECCIONADO
+   * =====================================================
+   */
+
+  const sensor =
+    espacioSeleccionado || {};
+
+  const sensorId =
+    sensor.id ||
+    sensor.idRtdb ||
+    sensor.sensorId ||
+    "N/A";
+
+  const distancia =
+    sensor.distancia ??
+    sensor.distance ??
+    0;
+
+  const ocupado =
+    sensor.ocupado === true ||
+    sensor.estado ===
+      "ocupado" ||
+    sensor.estado ===
+      "OCUPADO";
+
+  const columna =
+    obtenerColumna(sensor);
+
+  const numero =
+    obtenerNumero(sensor);
+
+  const latitud =
+    sensor.latitud ??
+    sensor.lat ??
+    sensor.latitude ??
+    "-";
+
+  const longitud =
+    sensor.longitud ??
+    sensor.lng ??
+    sensor.lon ??
+    sensor.longitude ??
+    "-";
+
+  const nombreSensor =
+    sensor.nombre ||
+    sensor.codigo ||
+    sensor.espacio ||
+    sensorId;
+
+  /*
+   * Porcentaje visual de distancia.
+   *
+   * 50 cm = 100%
+   */
+  const porcentaje =
+    Math.min(
+      100,
+      Math.max(
+        0,
+        (Number(distancia) /
+          50) *
+          100
+      )
+    );
+
   return (
-    <main className="page-container">
+    <div className="estacionamiento-page">
 
-      <section className="parking-hero">
+      {/* =================================================
+          HERO
+          ================================================= */}
 
-        <div>
-          <span className="section-label">
+      <section className="parqueadero-hero">
+
+        <div className="hero-contenido">
+
+          <span className="hero-kicker">
             CAMPUS UTEQ · QUEVEDO
           </span>
 
@@ -176,15 +358,17 @@ export default function Estacionamiento() {
             cuatro columnas. Cada cuadro
             representa un espacio y se
             actualiza como si recibiera
-            eventos desde Firebase
-            Realtime Database.
+            eventos desde Firebase Realtime
+            Database.
           </p>
+
         </div>
 
-        <div className="parking-hero__actions">
+        <div className="hero-acciones">
 
           <button
-            className="button button--primary"
+            type="button"
+            className="btn-principal"
             onClick={
               ejecutarSimulacion
             }
@@ -196,66 +380,159 @@ export default function Estacionamiento() {
           </button>
 
           <button
-            className={
-              simulacionAutomatica
-                ? "button button--active"
-                : "button button--secondary"
-            }
+            type="button"
+            className={`btn-secundario ${
+              automatico
+                ? "activo"
+                : ""
+            }`}
             onClick={() =>
-              setSimulacionAutomatica(
-                (valor) =>
-                  !valor
+              setAutomatico(
+                (actual) =>
+                  !actual
               )
             }
           >
-            {simulacionAutomatica
-              ? "● Simulación automática"
+            {automatico
+              ? "Desactivar automática"
               : "Activar automática"}
           </button>
 
-          <span className="threshold-text">
+          <small>
             Umbral: ocupado si la
             distancia es ≤ 50 cm
-          </span>
+          </small>
 
         </div>
 
       </section>
 
-      <ResumenEstacionamiento
-        espacios={espacios}
-      />
+      {/* =================================================
+          ESTADÍSTICAS
+          ================================================= */}
 
-      <section className="operational-grid">
+      <section className="estadisticas">
 
-        <div className="operational-main">
+        <div className="estadistica">
 
-          <div className="panel-header">
+          <span>
+            TOTAL
+          </span>
+
+          <strong>
+            {totalEspacios}
+          </strong>
+
+          <small>
+            espacios monitoreados
+          </small>
+
+        </div>
+
+        <div className="estadistica">
+
+          <span>
+            DISPONIBLES
+          </span>
+
+          <strong className="numero-disponible">
+            {espaciosDisponibles}
+          </strong>
+
+          <small>
+            {totalEspacios > 0
+              ? Math.round(
+                  (espaciosDisponibles /
+                    totalEspacios) *
+                    100
+                )
+              : 0}
+            % del parqueadero
+          </small>
+
+        </div>
+
+        <div className="estadistica">
+
+          <span>
+            OCUPADOS
+          </span>
+
+          <strong className="numero-ocupado">
+            {espaciosOcupados}
+          </strong>
+
+          <small>
+            {totalEspacios > 0
+              ? Math.round(
+                  (espaciosOcupados /
+                    totalEspacios) *
+                    100
+                )
+              : 0}
+            % del parqueadero
+          </small>
+
+        </div>
+
+        <div className="estadistica">
+
+          <span>
+            DISTRIBUCIÓN
+          </span>
+
+          <strong>
+            4 × 20
+          </strong>
+
+          <small>
+            columnas × espacios
+          </small>
+
+        </div>
+
+      </section>
+
+      {/* =================================================
+          ÁREA PRINCIPAL
+          ================================================= */}
+
+      <section className="contenido-parqueadero">
+
+        {/* =================================================
+            DISPONIBILIDAD
+            ================================================= */}
+
+        <div className="panel-disponibilidad">
+
+          <div className="panel-titulo">
 
             <div>
-              <span className="section-label">
+
+              <span className="panel-kicker">
                 VISTA OPERATIVA
               </span>
 
               <h2>
                 Disponibilidad por espacio
               </h2>
+
             </div>
 
-            <div className="legend">
+            <div className="leyenda">
 
               <span>
-                <i className="legend-dot legend-dot--free"></i>
+                <i className="punto libre" />
                 Libre
               </span>
 
               <span>
-                <i className="legend-dot legend-dot--occupied"></i>
+                <i className="punto ocupado" />
                 Ocupado
               </span>
 
               <span>
-                <i className="legend-dot legend-dot--selected"></i>
+                <i className="punto seleccionado" />
                 Seleccionado
               </span>
 
@@ -263,168 +540,506 @@ export default function Estacionamiento() {
 
           </div>
 
-          <FiltrosEspacios
-            estadoFiltro={
-              estadoFiltro
-            }
-            columnaFiltro={
-              columnaFiltro
-            }
-            setEstadoFiltro={
-              setEstadoFiltro
-            }
-            setColumnaFiltro={
-              setColumnaFiltro
-            }
-          />
+          {/* =================================================
+              FILTROS
+              ================================================= */}
 
-          <CuadriculaEstacionamiento
-            espacios={
-              espaciosFiltrados
-            }
-            seleccionado={
-              seleccionado
-            }
-            onSeleccionar={
-              setSeleccionado
-            }
-          />
+          <div className="filtros">
+
+            <div className="filtro-estado">
+
+              <button
+                className={
+                  filtroEstado ===
+                  "todos"
+                    ? "filtro activo"
+                    : "filtro"
+                }
+                onClick={() =>
+                  setFiltroEstado(
+                    "todos"
+                  )
+                }
+              >
+                Todos
+              </button>
+
+              <button
+                className={
+                  filtroEstado ===
+                  "libres"
+                    ? "filtro activo"
+                    : "filtro"
+                }
+                onClick={() =>
+                  setFiltroEstado(
+                    "libres"
+                  )
+                }
+              >
+                Libres
+              </button>
+
+              <button
+                className={
+                  filtroEstado ===
+                  "ocupados"
+                    ? "filtro activo"
+                    : "filtro"
+                }
+                onClick={() =>
+                  setFiltroEstado(
+                    "ocupados"
+                  )
+                }
+              >
+                Ocupados
+              </button>
+
+            </div>
+
+            <div className="filtro-columnas">
+
+              <button
+                className={
+                  filtroColumna ===
+                  "todas"
+                    ? "columna activo"
+                    : "columna"
+                }
+                onClick={() =>
+                  setFiltroColumna(
+                    "todas"
+                  )
+                }
+              >
+                Todas
+              </button>
+
+              {[
+                "A",
+                "B",
+                "C",
+                "D",
+              ].map(
+                (col) => (
+                  <button
+                    key={col}
+                    className={
+                      filtroColumna ===
+                      col
+                        ? "columna activo"
+                        : "columna"
+                    }
+                    onClick={() =>
+                      setFiltroColumna(
+                        col
+                      )
+                    }
+                  >
+                    {col}
+                  </button>
+                )
+              )}
+
+            </div>
+
+          </div>
+
+          {/* =================================================
+              GRID DE 80 ESPACIOS
+              ================================================= */}
+
+          <div className="parqueadero-grid">
+
+            <div className="entrada">
+              ENTRADA
+              <span>
+                — — — — — — — —
+              </span>
+            </div>
+
+            <div className="columnas-titulos">
+
+              <span>
+                COLUMNA A
+              </span>
+
+              <span>
+                COLUMNA B
+              </span>
+
+              <span>
+                COLUMNA C
+              </span>
+
+              <span>
+                COLUMNA D
+              </span>
+
+            </div>
+
+            <div className="espacios-grid">
+
+              {espaciosFiltrados.map(
+                (
+                  espacio,
+                  index
+                ) => {
+
+                  const seleccionado =
+                    espacioSeleccionado?.id ===
+                    espacio.id;
+
+                  const ocupadoActual =
+                    espacio.ocupado ===
+                    true;
+
+                  const id =
+                    espacio.id ||
+                    `ESP-${index + 1}`;
+
+                  const distanciaActual =
+                    espacio.distancia ??
+                    espacio.distance ??
+                    "--";
+
+                  const columnaActual =
+                    obtenerColumna(
+                      espacio
+                    );
+
+                  const numeroActual =
+                    obtenerNumero(
+                      espacio
+                    );
+
+                  return (
+                    <button
+                      type="button"
+                      key={id}
+                      className={`espacio-card ${
+                        ocupadoActual
+                          ? "espacio-ocupado"
+                          : "espacio-libre"
+                      } ${
+                        seleccionado
+                          ? "espacio-seleccionado"
+                          : ""
+                      }`}
+                      onClick={() =>
+                        seleccionarEspacio(
+                          espacio
+                        )
+                      }
+                    >
+
+                      <div className="espacio-superior">
+
+                        <strong>
+                          {columnaActual}
+                          {numeroActual}
+                        </strong>
+
+                        <span>
+                          {ocupadoActual
+                            ? "OCUPADO"
+                            : "LIBRE"}
+                        </span>
+
+                      </div>
+
+                      <div className="espacio-centro">
+
+                        <div className="sensor-icon">
+                          ◉
+                        </div>
+
+                        <strong>
+                          {distanciaActual}
+                          <small>
+                            cm
+                          </small>
+                        </strong>
+
+                      </div>
+
+                      <div className="espacio-inferior">
+
+                        <span>
+                          Espacio{" "}
+                          {numeroActual}
+                        </span>
+
+                        <span>
+                          {ocupadoActual
+                            ? "Vehículo detectado"
+                            : "Disponible"}
+                        </span>
+
+                      </div>
+
+                    </button>
+                  );
+                }
+              )}
+
+            </div>
+
+          </div>
 
         </div>
 
-        <aside className="selected-panel">
-
-          <span className="section-label">
+        {/* =================================================
             SENSOR SELECCIONADO
-          </span>
+            ================================================= */}
 
-          {seleccionado ? (
-            <>
-              <div className="selected-panel__title">
-                <h2>
-                  {seleccionado.columnaNombre}
-                  {String(
-                    seleccionado.numero
-                  ).padStart(2, "0")}
-                </h2>
+        <aside className="panel-sensor">
 
-                <span
-                  className={
-                    seleccionado.estado ===
-                    "ocupado"
-                      ? "badge badge--occupied"
-                      : "badge badge--free"
-                  }
-                >
-                  {
-                    seleccionado.estado
-                  }
-                </span>
-              </div>
+          <div className="sensor-cabecera">
 
-              <div className="selected-distance">
-                <span>
-                  Distancia detectada
-                </span>
+            <span className="panel-kicker">
+              SENSOR SELECCIONADO
+            </span>
 
-                <strong>
-                  {Number(
-                    seleccionado.distanciaDetectada ||
-                      0
-                  ).toFixed(0)}
-                  <small> cm</small>
-                </strong>
+            <div className="sensor-titulo">
 
-                <div className="distance-bar">
-                  <span
-                    style={{
-                      width: `${Math.min(
-                        100,
-                        Math.max(
-                          0,
-                          Number(
-                            seleccionado.distanciaDetectada ||
-                              0
-                          ) /
-                            3
-                        )
-                      )}%`
-                    }}
-                  ></span>
-                </div>
+              <h2>
+                {nombreSensor}
+              </h2>
 
-                <small>
-                  Umbral del sensor:
-                  50 cm
-                </small>
-              </div>
+              <span
+                className={
+                  ocupado
+                    ? "badge-ocupado"
+                    : "badge-libre"
+                }
+              >
+                {ocupado
+                  ? "OCUPADO"
+                  : "LIBRE"}
+              </span>
 
-              <div className="selected-data">
-
-                <div>
-                  <span>ID RTDB</span>
-                  <strong>
-                    {seleccionado.id}
-                  </strong>
-                </div>
-
-                <div>
-                  <span>
-                    COLUMNA / NÚMERO
-                  </span>
-                  <strong>
-                    {seleccionado.columnaNombre}{" "}
-                    /{" "}
-                    {seleccionado.numero}
-                  </strong>
-                </div>
-
-                <div>
-                  <span>
-                    CENTRO GEOGRÁFICO
-                  </span>
-                  <strong>
-                    {
-                      seleccionado
-                        .ubicacion
-                        ?.latitud
-                    }
-                    ,{" "}
-                    {
-                      seleccionado
-                        .ubicacion
-                        ?.longitud
-                    }
-                  </strong>
-                </div>
-
-              </div>
-
-            </>
-          ) : (
-            <div className="selected-empty">
-              <div className="selected-empty__icon">
-                ◉
-              </div>
-
-              <h3>
-                Selecciona un espacio
-              </h3>
-
-              <p>
-                Haz clic sobre cualquier
-                estacionamiento para
-                consultar sus datos.
-              </p>
             </div>
-          )}
+
+          </div>
+
+          {/* =================================================
+              DISTANCIA
+              ================================================= */}
+
+          <div className="distancia-panel">
+
+            <span>
+              Distancia detectada
+            </span>
+
+            <div className="distancia-numero">
+
+              <strong>
+                {distancia}
+              </strong>
+
+              <small>
+                cm
+              </small>
+
+            </div>
+
+            <div className="barra-distancia">
+
+              <div
+                style={{
+                  width: `${porcentaje}%`,
+                }}
+              />
+
+            </div>
+
+            <small>
+              Umbral del sensor: 50 cm
+            </small>
+
+          </div>
+
+          {/* =================================================
+              INFORMACIÓN
+              ================================================= */}
+
+          <div className="informacion-sensor">
+
+            <div>
+              <span>
+                ID RTDB
+              </span>
+
+              <strong>
+                {sensorId}
+              </strong>
+            </div>
+
+            <div>
+              <span>
+                COLUMNA / NÚMERO
+              </span>
+
+              <strong>
+                {columna} / {numero}
+              </strong>
+            </div>
+
+            <div>
+              <span>
+                CENTRO GEOGRÁFICO
+              </span>
+
+              <strong>
+                {latitud},{" "}
+                {longitud}
+              </strong>
+            </div>
+
+          </div>
+
+          {/* =================================================
+              HISTORIAL
+              ================================================= */}
+
+          <HistorialEspacio
+            historial={historial}
+            cargando={
+              cargandoHistorial
+            }
+            error={
+              errorHistorial
+            }
+          />
 
         </aside>
 
       </section>
 
-      <MapaEstacionamiento />
-
-    </main>
+    </div>
   );
+}
+
+
+/*
+ * =====================================================
+ * FUNCIONES AUXILIARES
+ * =====================================================
+ */
+
+function obtenerColumna(
+  espacio
+) {
+  if (
+    espacio.columna !==
+    undefined
+  ) {
+    return String(
+      espacio.columna
+    ).toUpperCase();
+  }
+
+  if (
+    espacio.col !==
+    undefined
+  ) {
+    return String(
+      espacio.col
+    ).toUpperCase();
+  }
+
+  if (
+    espacio.column !==
+    undefined
+  ) {
+    return String(
+      espacio.column
+    ).toUpperCase();
+  }
+
+  /*
+   * Intentamos obtener la columna
+   * desde el ID.
+   *
+   * Ejemplo:
+   * ESP-C04-04
+   *       ↑
+   *       C
+   */
+
+  const id =
+    espacio.id ||
+    espacio.idRtdb ||
+    "";
+
+  const coincidencia =
+    String(id).match(
+      /ESP-([A-D])/i
+    );
+
+  if (coincidencia) {
+    return coincidencia[1]
+      .toUpperCase();
+  }
+
+  /*
+   * Si no existe columna,
+   * utilizamos la posición.
+   */
+
+  return "-";
+}
+
+
+function obtenerNumero(
+  espacio
+) {
+  if (
+    espacio.numero !==
+    undefined
+  ) {
+    return espacio.numero;
+  }
+
+  if (
+    espacio.num !==
+    undefined
+  ) {
+    return espacio.num;
+  }
+
+  if (
+    espacio.number !==
+    undefined
+  ) {
+    return espacio.number;
+  }
+
+  const id =
+    espacio.id ||
+    espacio.idRtdb ||
+    "";
+
+  /*
+   * Ejemplo:
+   * ESP-C04-04
+   *          ↑
+   *          04
+   */
+
+  const coincidencia =
+    String(id).match(
+      /ESP-[A-D](\d+)/i
+    );
+
+  if (coincidencia) {
+    return Number(
+      coincidencia[1]
+    );
+  }
+
+  return "-";
 }
